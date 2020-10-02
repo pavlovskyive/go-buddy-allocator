@@ -1,28 +1,3 @@
-// package main
-
-// import (
-// 	"fmt"
-
-// 	"github.com/golang-collections/go-datastructures/bitarray"
-// )
-
-// // Allocator allocates memory
-// type Allocator struct {
-// 	bitArray bitarray.BitArray
-// }
-
-// // NewAllocator inits allocator
-// func NewAllocator(size int) *Allocator {
-// 	a := Allocator{}
-// 	a.bitArray = bitarray.NewBitArray(uint64(size))
-// 	return &a
-// }
-
-// func main() {
-// 	a := NewAllocator(1024)
-// 	fmt.Println(a.bitArray.Capacity())
-// }
-
 package main
 
 import (
@@ -46,7 +21,8 @@ func minLog2(number int) int {
 	return i
 }
 
-// Block stores pointer to block of memory
+// Block is a structure implemented to store a offset from start poiner
+// We can use plain int but this structure eases understanding of code at this point
 type Block struct {
 	offset int
 }
@@ -77,7 +53,7 @@ type Allocator struct {
 	freeQueues []BlockQueue
 }
 
-// Alloc allocates block of given size
+// Alloc allocates block of given size and returns pointer to this block
 func (a *Allocator) Alloc(size int) unsafe.Pointer {
 	alignedSize := minPowOfTwo(size)
 
