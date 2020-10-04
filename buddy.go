@@ -1,4 +1,4 @@
-package main
+package buddy
 
 import (
 	"log"
@@ -8,6 +8,7 @@ import (
 //#include <string.h>
 import "C"
 
+// minPowOfTwo returns ceil power of two
 func minPowOfTwo(number int) int {
 	i := 1
 	for number > i {
@@ -16,6 +17,7 @@ func minPowOfTwo(number int) int {
 	return i
 }
 
+// minLog2 returns ceil log2(number)
 func minLog2(number int) int {
 	i := 0
 	for 1<<i < number {
@@ -24,7 +26,7 @@ func minLog2(number int) int {
 	return i
 }
 
-// BlockQueue stores free blocks
+// BlockQueue is queue type structure which stores pointers to free blocks
 type BlockQueue struct {
 	array []unsafe.Pointer
 }
@@ -47,11 +49,20 @@ func (q *BlockQueue) RemoveAt(index int) {
 	q.array = append(q.array[:index], q.array[index+1:]...)
 }
 
+// Length returns number of elements in queue
+func (q *BlockQueue) Length() int {
+	return len(q.array)
+}
+
 // Allocator handles memory allocation
 type Allocator struct {
-	size            int
-	maxDepth        int
-	freeQueues      []BlockQueue
+	// size of allocated memory
+	size int
+	// computed number of levels in allocator
+	maxDepth int
+	// lists of free elements
+	freeQueues []BlockQueue
+	// map that stores level of block with certain pointer
 	allocatedBlocks map[unsafe.Pointer]int
 }
 
@@ -77,6 +88,7 @@ func (a *Allocator) Alloc(size int) unsafe.Pointer {
 		return nil
 	}
 
+	// store level of block. Needed for freeing and reallocating this block later
 	a.allocatedBlocks[pointer] = level
 	return unsafe.Pointer(pointer)
 }
@@ -90,9 +102,10 @@ func (a *Allocator) Free(pointer unsafe.Pointer) {
 
 	a.freeQueues[level].Append(pointer)
 
+	// combining blocks if buddy block is free
 	for i, p := range a.freeQueues[level].array {
 		if p == buddyPointer {
-			a.freeQueues[level].RemoveAt(len(a.freeQueues[level].array) - 1)
+			a.freeQueues[level].RemoveAt(a.freeQueues[level].Length() - 1)
 			a.freeQueues[level].RemoveAt(i)
 			a.allocatedBlocks[pointer] = level - 1
 			a.Free(pointer)
@@ -100,12 +113,13 @@ func (a *Allocator) Free(pointer unsafe.Pointer) {
 	}
 }
 
-// FindFreeBlockOnLevel searches for free blocks on needed level
+// FindFreeBlockOnLevel searches for free blocks on given level
 func (a *Allocator) FindFreeBlockOnLevel(level int) unsafe.Pointer {
 	if level < 0 {
 		return nil
 	}
 
+	// split higher level block if no free block of given size
 	if len(a.freeQueues[level].array) == 0 {
 		higherLevelBlockPointer := a.FindFreeBlockOnLevel(level - 1)
 		if higherLevelBlockPointer == nil {
@@ -119,7 +133,7 @@ func (a *Allocator) FindFreeBlockOnLevel(level int) unsafe.Pointer {
 	return b
 }
 
-// FindBuddy returns pointer to buddy-block to given
+// FindBuddy returns pointer to buddy of given block
 func (a *Allocator) FindBuddy(pointer unsafe.Pointer, level int) unsafe.Pointer {
 	return unsafe.Pointer(uintptr(pointer) ^ uintptr(a.SizeOfLevel(level)))
 }
@@ -127,13 +141,22 @@ func (a *Allocator) FindBuddy(pointer unsafe.Pointer, level int) unsafe.Pointer 
 // Realloc changes size of given block
 func (a *Allocator) Realloc(pointer unsafe.Pointer, size int) unsafe.Pointer {
 	alignedSize := minPowOfTwo(size)
+	oldSize := a.SizeOfLevel(a.allocatedBlocks[pointer])
 	level := a.LevelOfSize(alignedSize)
+
 	if a.allocatedBlocks[pointer] == level {
 		return pointer
 	}
+
 	a.Free(pointer)
 	newPointer := a.Alloc(alignedSize)
-	C.memcpy(pointer, newPointer, C.size_t(a.SizeOfLevel(level)))
+
+	// copy data from old pointer to new one
+	if alignedSize < oldSize {
+		C.memcpy(pointer, newPointer, C.size_t(alignedSize))
+	} else {
+		C.memcpy(pointer, newPointer, C.size_t(oldSize))
+	}
 
 	return newPointer
 }
@@ -158,11 +181,11 @@ func (a *Allocator) Log() {
 	}
 }
 
-// NewAllocator creates instance of allocator
+// NewAllocator initializes an allocator
 func NewAllocator(size int) *Allocator {
 
 	a := &Allocator{}
-	if size < 32 {
+	if size < int(unsafe.Sizeof(int(0))) {
 		log.Fatal("Too small size")
 	}
 
@@ -173,59 +196,8 @@ func NewAllocator(size int) *Allocator {
 	a.freeQueues = make([]BlockQueue, a.maxDepth+1)
 	a.allocatedBlocks = make(map[unsafe.Pointer]int)
 
-	// mem := make([]int, alignedSize/int(unsafe.Sizeof(int(0))))
 	mem := C.malloc(C.ulong(alignedSize))
 	a.freeQueues[0].Append(unsafe.Pointer(&mem))
 
 	return a
-}
-
-func main() {
-	a := NewAllocator(1024)
-
-	log.Println("Size of allocator in worst scenario: ", unsafe.Sizeof(Allocator{}))
-	log.Println("Pointer to start of allocated memory: ", a.freeQueues[0].array[0])
-	a.Log()
-
-	log.Println()
-
-	log.Println("Allocating block with size 512...")
-	x := a.Alloc(512)
-	a.Log()
-
-	log.Println()
-
-	log.Println("Allocating block with size 8...")
-	y := a.Alloc(8)
-	a.Log()
-
-	log.Println()
-
-	log.Println("Deallocating block with size 8...")
-	a.Free(y)
-	a.Log()
-
-	log.Println()
-
-	log.Println("Deallocating block with size 512...")
-	a.Free(x)
-	a.Log()
-
-	log.Println()
-
-	log.Println("Allocating block with size 16...")
-	x = a.Alloc(16)
-	a.Log()
-
-	log.Println()
-
-	log.Println("Allocating block with size 256...")
-	y = a.Alloc(256)
-	a.Log()
-
-	log.Println()
-
-	log.Println("Reallocating block with size 16 to size 128")
-	x = a.Realloc(x, 128)
-	a.Log()
 }
