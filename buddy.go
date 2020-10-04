@@ -5,6 +5,9 @@ import (
 	"unsafe"
 )
 
+//#include <string.h>
+import "C"
+
 func minPowOfTwo(number int) int {
 	i := 1
 	for number > i {
@@ -121,7 +124,21 @@ func (a *Allocator) FindBuddy(pointer unsafe.Pointer, level int) unsafe.Pointer 
 	return unsafe.Pointer(uintptr(pointer) ^ uintptr(a.SizeOfLevel(level)))
 }
 
-// Log prints out all free blocks stored in allocator
+// Realloc changes size of given block
+func (a *Allocator) Realloc(pointer unsafe.Pointer, size int) unsafe.Pointer {
+	alignedSize := minPowOfTwo(size)
+	level := a.LevelOfSize(alignedSize)
+	if a.allocatedBlocks[pointer] == level {
+		return pointer
+	}
+	a.Free(pointer)
+	newPointer := a.Alloc(alignedSize)
+	C.memcpy(pointer, newPointer, C.size_t(a.SizeOfLevel(level)))
+
+	return newPointer
+}
+
+// Log prints out all allocated and free blocks
 func (a *Allocator) Log() {
 	log.Println("Allocated memory blocks:")
 
@@ -156,7 +173,8 @@ func NewAllocator(size int) *Allocator {
 	a.freeQueues = make([]BlockQueue, a.maxDepth+1)
 	a.allocatedBlocks = make(map[unsafe.Pointer]int)
 
-	mem := make([]int, alignedSize/int(unsafe.Sizeof(int(0))))
+	// mem := make([]int, alignedSize/int(unsafe.Sizeof(int(0))))
+	mem := C.malloc(C.ulong(alignedSize))
 	a.freeQueues[0].Append(unsafe.Pointer(&mem))
 
 	return a
@@ -172,7 +190,6 @@ func main() {
 	log.Println()
 
 	log.Println("Allocating block with size 512...")
-	log.Println()
 	x := a.Alloc(512)
 	a.Log()
 
@@ -192,5 +209,23 @@ func main() {
 
 	log.Println("Deallocating block with size 512...")
 	a.Free(x)
+	a.Log()
+
+	log.Println()
+
+	log.Println("Allocating block with size 16...")
+	x = a.Alloc(16)
+	a.Log()
+
+	log.Println()
+
+	log.Println("Allocating block with size 256...")
+	y = a.Alloc(256)
+	a.Log()
+
+	log.Println()
+
+	log.Println("Reallocating block with size 16 to size 128")
+	x = a.Realloc(x, 128)
 	a.Log()
 }
